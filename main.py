@@ -1,13 +1,29 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, simpledialog, messagebox
 from rtree import index
 import copy
 
+# Crear la ventana principal
 class RTreeApp:
     def __init__(self, root):
         self.root = root
         self.root.title("R-Tree Visualizer")
         self.index = index.Index()
+        self.history = [copy.deepcopy(self.index)]  # Historial para skip back/skip
+        self.current_state = 0  # Puntero al estado actual
+
+        # Dimensiones del canvas y escala
+        self.canvas_width = 800
+        self.canvas_height = 600
+        self.coord_scale = 10  # Unidades de escala inicial
+        self.offset_x = 0  # Desplazamiento en X
+        self.offset_y = 0  # Desplazamiento en Y
+        self.zoom_factor = 1.0  # Factor de zoom inicial
+
+        # Variables de arrastre
+        self.dragging = False
+        self.drag_start_x = 0
+        self.drag_start_y = 0
 
         # Estilo de la ventana
         discord_gray = "#2f3136"
@@ -15,149 +31,240 @@ class RTreeApp:
         discord_text = "#ffffff"
 
         self.root.configure(bg=discord_gray)
-        self.root.minsize(800, 600)  # Establecer tamaño mínimo de la ventana
+        self.log_text = tk.StringVar(value="")
 
-        # Configuración de grid para adaptabilidad
-        self.root.rowconfigure(0, weight=1)
-        self.root.columnconfigure(0, weight=1)
+        # Crear el canvas para dibujar
+        self.canvas = tk.Canvas(self.root, width=self.canvas_width, height=self.canvas_height, bg=discord_dark, highlightthickness=0)
+        self.canvas.grid(row=0, column=0, columnspan=5)
 
-        # Canvas
-        self.canvas = tk.Canvas(self.root, bg=discord_dark, highlightthickness=0)
-        self.canvas.grid(row=0, column=0, columnspan=5, sticky="nsew")
+        # Vincular eventos de zoom y arrastre
+        self.canvas.bind("<MouseWheel>", self.zoom)
+        self.canvas.bind("<ButtonPress-1>", self.start_drag)
+        self.canvas.bind("<B1-Motion>", self.drag)
+        self.canvas.bind("<ButtonRelease-1>", self.stop_drag)
 
-        # Frame para botones y entradas
-        self.button_frame = tk.Frame(self.root, bg=discord_gray)
-        self.button_frame.grid(row=1, column=0, columnspan=5, sticky="ew")
-        self.button_frame.columnconfigure([0, 1, 2, 3], weight=1)
-
-        # Insertar
-        self.insert_frame = tk.Frame(self.button_frame, bg=discord_gray, bd=2, relief="groove", highlightbackground="cyan", highlightcolor="cyan", highlightthickness=2)
-        self.insert_frame.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
-        self.insert_frame.columnconfigure([0, 1], weight=1)
-        tk.Label(self.insert_frame, text="Insertar (x1, y1, x2, y2):", bg=discord_gray, fg=discord_text).grid(row=0, column=0, sticky="e")
-        self.insert_entry = tk.Entry(self.insert_frame, bg=discord_dark, fg=discord_text, insertbackground=discord_text)
-        self.insert_entry.grid(row=0, column=1, sticky="ew")
-        insert_button = tk.Button(self.insert_frame, text="Insertar", command=self.insert_rect, bg="cyan", fg=discord_dark, relief="flat", bd=0)
-        insert_button.grid(row=1, column=0, columnspan=2, pady=5)
-        insert_button.configure(highlightbackground="cyan", highlightthickness=2, borderwidth=2, relief="solid", highlightcolor="cyan", padx=10, pady=5)
-        insert_button.config(borderwidth=2, relief="solid", highlightthickness=2, highlightbackground="cyan", highlightcolor="cyan", padx=10, pady=5)
-
-        # Eliminar
-        self.delete_frame = tk.Frame(self.button_frame, bg=discord_gray, bd=2, relief="groove", highlightbackground="red", highlightcolor="red", highlightthickness=2)
-        self.delete_frame.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-        self.delete_frame.columnconfigure([0, 1], weight=1)
-        tk.Label(self.delete_frame, text="Eliminar ID:", bg=discord_gray, fg=discord_text).grid(row=0, column=0, sticky="e")
-        self.delete_entry = tk.Entry(self.delete_frame, bg=discord_dark, fg=discord_text, insertbackground=discord_text)
-        self.delete_entry.grid(row=0, column=1, sticky="ew")
-        delete_button = tk.Button(self.delete_frame, text="Eliminar", command=self.delete_rect, bg="red", fg=discord_dark, relief="flat", bd=0)
-        delete_button.grid(row=1, column=0, columnspan=2, pady=5)
-        delete_button.configure(highlightbackground="red", highlightthickness=2, borderwidth=2, relief="solid", highlightcolor="red", padx=10, pady=5)
-        delete_button.config(borderwidth=2, relief="solid", highlightthickness=2, highlightbackground="red", highlightcolor="red", padx=10, pady=5)
-
-        # Buscar
-        self.search_frame = tk.Frame(self.button_frame, bg=discord_gray, bd=2, relief="groove", highlightbackground="lime", highlightcolor="lime", highlightthickness=2)
-        self.search_frame.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
-        self.search_frame.columnconfigure([0, 1], weight=1)
-        tk.Label(self.search_frame, text="Buscar (x1, y1, x2, y2):", bg=discord_gray, fg=discord_text).grid(row=0, column=0, sticky="e")
-        self.search_entry = tk.Entry(self.search_frame, bg=discord_dark, fg=discord_text, insertbackground=discord_text)
-        self.search_entry.grid(row=0, column=1, sticky="ew")
-        search_button = tk.Button(self.search_frame, text="Buscar", command=self.search_rect, bg="lime", fg=discord_dark, relief="flat", bd=0)
-        search_button.grid(row=1, column=0, columnspan=2, pady=5)
-        search_button.configure(highlightbackground="lime", highlightthickness=2, borderwidth=2, relief="solid", highlightcolor="lime", padx=10, pady=5)
-        search_button.config(borderwidth=2, relief="solid", highlightthickness=2, highlightbackground="lime", highlightcolor="lime", padx=10, pady=5)
-
-        # Limpiar
-        self.clear_frame = tk.Frame(self.button_frame, bg=discord_gray, bd=2, relief="groove", highlightbackground="yellow", highlightcolor="yellow", highlightthickness=2)
-        self.clear_frame.grid(row=0, column=3, padx=5, pady=5, sticky="ew")
-        self.clear_frame.columnconfigure(0, weight=1)
-        clear_button = tk.Button(self.clear_frame, text="Limpiar", command=self.clear_canvas, bg="yellow", fg=discord_dark, relief="flat", bd=0)
-        clear_button.grid(row=0, column=0, pady=5)
-        clear_button.configure(highlightbackground="yellow", highlightthickness=2, borderwidth=2, relief="solid", highlightcolor="yellow", padx=10, pady=5)
-        clear_button.config(borderwidth=2, relief="solid", highlightthickness=2, highlightbackground="yellow", highlightcolor="yellow", padx=10, pady=5)
+        # Botones de operación
+        ttk.Button(self.root, text="Insertar", command=self.insert_rect).grid(row=1, column=0)
+        ttk.Button(self.root, text="Eliminar", command=self.delete_rect).grid(row=1, column=1)
+        ttk.Button(self.root, text="Buscar", command=self.search_rect).grid(row=1, column=2)
+        ttk.Button(self.root, text="Skip Back", command=self.skip_back).grid(row=1, column=3)
+        ttk.Button(self.root, text="Skip", command=self.skip).grid(row=1, column=4)
 
         # Registro de operaciones
-        self.log_box = tk.Text(self.root, height=10, state="normal", wrap="word", bg=discord_dark, fg=discord_text)
-        self.log_box.grid(row=2, column=0, columnspan=5, sticky="nsew")
-        self.root.rowconfigure(2, weight=1)
+        self.log_label = ttk.Label(self.root, text="Registro de Operaciones:", background=discord_gray, foreground=discord_text)
+        self.log_label.grid(row=2, column=0, columnspan=5, sticky="w")
+        self.log_box = tk.Text(self.root, height=10, width=95, state="disabled", wrap="word", bg=discord_dark, fg=discord_text)
+        self.log_box.grid(row=3, column=0, columnspan=5)
 
         # Colores para niveles
         self.colors = ["cyan", "yellow", "orange", "lime", "magenta", "red", "blue", "purple"]
 
-    def log_operation(self, message, error=False):
+        # Dibujar los ejes iniciales
+        self.draw_axes()
+
+    def draw_axes(self):
+        """Dibuja un sistema de coordenadas en el canvas."""
+        self.canvas.delete("all")
+        scaled_scale = self.coord_scale * self.zoom_factor
+
+        # Eje X
+        self.canvas.create_line(
+            50 + self.offset_x, self.canvas_height - 50 - self.offset_y,
+            self.canvas_width - 50 + self.offset_x, self.canvas_height - 50 - self.offset_y,
+            fill="white", width=2
+        )
+        # Eje Y
+        self.canvas.create_line(
+            50 + self.offset_x, self.canvas_height - 50 - self.offset_y,
+            50 + self.offset_x, 50 - self.offset_y,
+            fill="white", width=2
+        )
+
+        # Marcas y etiquetas en X
+        for i in range(0, int((self.canvas_width // scaled_scale))):
+            x = 50 + i * scaled_scale + self.offset_x
+            if x < self.canvas_width - 50:
+                self.canvas.create_line(x, self.canvas_height - 45 - self.offset_y, x, self.canvas_height - 55 - self.offset_y, fill="white")
+                self.canvas.create_text(x, self.canvas_height - 30 - self.offset_y, text=str(i), fill="white", font=("Arial", 8))
+
+        # Marcas y etiquetas en Y
+        for i in range(0, int((self.canvas_height // scaled_scale))):
+            y = self.canvas_height - 50 - i * scaled_scale - self.offset_y
+            if y > 50:
+                self.canvas.create_line(45 + self.offset_x, y, 55 + self.offset_x, y, fill="white")
+                self.canvas.create_text(30 + self.offset_x, y, text=str(i), fill="white", font=("Arial", 8))
+
+    def zoom(self, event):
+        """Maneja el evento de zoom con Ctrl + scroll del ratón."""
+        if event.state & 0x4:  # Verificar si Ctrl está presionado
+            if event.delta > 0:  # Zoom In
+                self.zoom_factor *= 1.1
+            elif event.delta < 0:  # Zoom Out
+                self.zoom_factor /= 1.1
+
+            # Limitar el zoom para evitar problemas
+            self.zoom_factor = max(0.1, min(self.zoom_factor, 10))
+            self.draw_mbr()
+
+    def start_drag(self, event):
+        """Inicia el arrastre del sistema de coordenadas."""
+        self.dragging = True
+        self.drag_start_x = event.x
+        self.drag_start_y = event.y
+
+    def drag(self, event):
+        """Realiza el arrastre del sistema de coordenadas."""
+        if self.dragging:
+            dx = event.x - self.drag_start_x
+            dy = event.y - self.drag_start_y
+
+            # Actualizar los offsets
+            self.offset_x += dx
+            self.offset_y += dy
+
+            # Limitar el movimiento al primer cuadrante
+            self.offset_x = max(-50, self.offset_x)
+            self.offset_y = max(-50, self.offset_y)
+
+            self.drag_start_x = event.x
+            self.drag_start_y = event.y
+            self.draw_mbr()
+
+    def stop_drag(self, event):
+        """Termina el arrastre del sistema de coordenadas."""
+        self.dragging = False
+
+    def log_operation(self, message):
         """Registra una operación en la caja de texto."""
         self.log_box.configure(state="normal")
-        color = "red" if error else "white"
-        self.log_box.insert(tk.END, f"{message}\n", color)
-        self.log_box.tag_configure("red", foreground="red")
-        self.log_box.tag_configure("white", foreground="white")
+        self.log_box.insert(tk.END, f"{message}\n")
         self.log_box.configure(state="disabled")
         self.log_box.see(tk.END)
 
     def draw_rectangle(self, rect, rect_id, color="blue"):
         """Dibuja un rectángulo con su ID en el canvas."""
-        self.canvas.create_rectangle(rect[0], rect[1], rect[2], rect[3], outline=color, width=3)
+        scaled_scale = self.coord_scale * self.zoom_factor
+
+        # Escalar coordenadas al sistema de coordenadas visual
+        scaled_rect = (
+            50 + self.offset_x + rect[0] * scaled_scale,
+            self.canvas_height - 50 - self.offset_y - rect[1] * scaled_scale,
+            50 + self.offset_x + rect[2] * scaled_scale,
+            self.canvas_height - 50 - self.offset_y - rect[3] * scaled_scale,
+        )
+        self.canvas.create_rectangle(scaled_rect, outline=color, width=3)
         self.canvas.create_text(
-            (rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2,
-            text=str(rect_id), fill="white", font=("Arial", 12, "bold")
+            (scaled_rect[0] + scaled_rect[2]) / 2, (scaled_rect[1] + scaled_rect[3]) / 2,
+            text=str(rect_id), fill="white", font=("Arial", 10, "bold")
         )
 
     def draw_mbr(self):
         """Dibuja los MBRs actuales del R-Tree con colores diferenciados por niveles."""
         self.canvas.delete("all")
-        for obj in self.index.intersection((0, 0, 800, 600), objects=True):
-            rect = obj.bbox
+        self.draw_axes()
+        for obj in self.index.intersection((0, 0, 100, 100), objects=True):
             level = self.get_level(obj.id)
             color = self.colors[level % len(self.colors)]
-            self.draw_rectangle(rect, obj.id, color)
+            self.draw_rectangle(obj.bbox, obj.id, color)
 
-    def clear_canvas(self):
-        """Limpia el canvas y el R-Tree."""
-        self.canvas.delete("all")
-        self.index = index.Index()
-        self.log_operation("Canvas y R-Tree limpiados.")
+    def save_state(self):
+        """Guarda el estado actual en el historial."""
+        self.history = self.history[:self.current_state + 1]
+        self.history.append(copy.deepcopy(self.index))
+        self.current_state += 1
+
+    def skip_back(self):
+        """Vuelve al estado anterior del historial."""
+        if self.current_state > 0:
+            self.current_state -= 1
+            self.index = copy.deepcopy(self.history[self.current_state])
+            self.draw_mbr()
+            self.log_operation("Estado restaurado al anterior.")
+
+    def skip(self):
+        """Avanza al siguiente estado en el historial."""
+        if self.current_state < len(self.history) - 1:
+            self.current_state += 1
+            self.index = copy.deepcopy(self.history[self.current_state])
+            self.draw_mbr()
+            self.log_operation("Estado restaurado al siguiente.")
 
     def get_level(self, rect_id):
         """Calcula el nivel del rectángulo en el R-Tree."""
         return rect_id % len(self.colors)
 
     def insert_rect(self):
-        """Inserta un rectángulo en el R-Tree."""
-        coords = self.insert_entry.get()
+        """Permite insertar un rectángulo con datos personalizados como cadena."""
         try:
-            x1, y1, x2, y2 = map(int, coords.split(","))
+            rect_input = simpledialog.askstring("Insertar", "Ingresa las coordenadas: x1, y1, x2, y2")
+            if not rect_input:
+                return
+
+            coords = list(map(int, rect_input.split(",")))
+            if len(coords) != 4:
+                messagebox.showerror("Error", "Debes ingresar exactamente 4 valores separados por comas.")
+                return
+
+            x1, y1, x2, y2 = coords
             if x1 >= x2 or y1 >= y2:
-                raise ValueError("Coordenadas inválidas.")
+                messagebox.showerror("Error", "Las coordenadas deben formar un rectángulo válido (x1 < x2, y1 < y2).")
+                return
+
+            rect = (x1, y1, x2, y2)
             rect_id = len(self.index)
-            self.index.insert(rect_id, (x1, y1, x2, y2))
+            self.index.insert(rect_id, rect)
+            self.save_state()
             self.draw_mbr()
-            self.log_operation(f"Insertado rectángulo {coords} con ID {rect_id}.")
+            self.log_operation(f"Insertado rectángulo {rect} con ID {rect_id}")
+        except ValueError:
+            messagebox.showerror("Error", "El formato debe ser: x1, y1, x2, y2 con valores numéricos.")
         except Exception as e:
-            self.log_operation(f"Error al insertar: {e}", error=True)
+            messagebox.showerror("Error", f"Error al insertar rectángulo: {e}")
 
     def delete_rect(self):
-        """Elimina un rectángulo por su ID."""
-        rect_id = self.delete_entry.get()
+        """Elimina un rectángulo dado su ID."""
         try:
-            rect_id = int(rect_id)
-            for obj in self.index.intersection((0, 0, 800, 600), objects=True):
-                if obj.id == rect_id:
-                    self.index.delete(rect_id, obj.bbox)
+            id_to_delete = simpledialog.askinteger("Eliminar", "ID del rectángulo a eliminar:")
+            if id_to_delete is None:
+                return
+
+            for obj in self.index.intersection((0, 0, 100, 100), objects=True):
+                if obj.id == id_to_delete:
+                    rect = obj.bbox
+                    self.index.delete(id_to_delete, rect)
+                    self.save_state()
                     self.draw_mbr()
-                    self.log_operation(f"Eliminado rectángulo con ID {rect_id}.")
+                    self.log_operation(f"Eliminado rectángulo {rect} con ID {id_to_delete}")
                     return
-            self.log_operation("ID no encontrado.", error=True)
+
+            messagebox.showerror("Error", "ID no encontrado.")
         except Exception as e:
-            self.log_operation(f"Error al eliminar: {e}", error=True)
+            messagebox.showerror("Error", f"Error al eliminar rectángulo: {e}")
 
     def search_rect(self):
-        """Busca rectángulos que intersecten un área."""
-        coords = self.search_entry.get()
+        """Busca rectángulos que intersectan un área definida."""
         try:
-            x1, y1, x2, y2 = map(int, coords.split(","))
-            results = [obj.id for obj in self.index.intersection((x1, y1, x2, y2), objects=True)]
-            self.log_operation(f"Área buscada: {coords}. IDs encontrados: {results}")
+            rect_input = simpledialog.askstring("Buscar", "Ingresa las coordenadas del área: x1, y1, x2, y2")
+            if not rect_input:
+                return
+
+            coords = list(map(int, rect_input.split(",")))
+            if len(coords) != 4:
+                messagebox.showerror("Error", "Debes ingresar exactamente 4 valores separados por comas.")
+                return
+
+            x1, y1, x2, y2 = coords
+            search_area = (x1, y1, x2, y2)
+            self.draw_rectangle(search_area, "B", color="red")
+
+            results = [obj.id for obj in self.index.intersection(search_area, objects=True)]
+            self.log_operation(f"Área buscada: {search_area}. Rectángulos encontrados: {results}")
+            messagebox.showinfo("Búsqueda", f"Área buscada: {search_area}\nIDs encontrados: {results}")
+        except ValueError:
+            messagebox.showerror("Error", "El formato debe ser: x1, y1, x2, y2 con valores numéricos.")
         except Exception as e:
-            self.log_operation(f"Error al buscar: {e}", error=True)
+            messagebox.showerror("Error", f"Error al buscar rectángulos: {e}")
+
 
 if __name__ == "__main__":
     root = tk.Tk()
