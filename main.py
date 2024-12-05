@@ -3,7 +3,6 @@ from tkinter import ttk, simpledialog, messagebox
 from rtree import index
 import copy
 
-# Crear la ventana principal
 class RTreeApp:
     def __init__(self, root):
         self.root = root
@@ -11,6 +10,7 @@ class RTreeApp:
         self.index = index.Index()
         self.history = [copy.deepcopy(self.index)]  # Historial para skip back/skip
         self.current_state = 0  # Puntero al estado actual
+        self.root.resizable(False, False)
 
         # Dimensiones del canvas y escala
         self.canvas_width = 800
@@ -47,8 +47,7 @@ class RTreeApp:
         ttk.Button(self.root, text="Insertar", command=self.insert_rect).grid(row=1, column=0)
         ttk.Button(self.root, text="Eliminar", command=self.delete_rect).grid(row=1, column=1)
         ttk.Button(self.root, text="Buscar", command=self.search_rect).grid(row=1, column=2)
-        ttk.Button(self.root, text="Skip Back", command=self.skip_back).grid(row=1, column=3)
-        ttk.Button(self.root, text="Skip", command=self.skip).grid(row=1, column=4)
+        ttk.Button(self.root, text="Limpiar", command=self.clear_all).grid(row=1, column=3)
 
         # Registro de operaciones
         self.log_label = ttk.Label(self.root, text="Registro de Operaciones:", background=discord_gray, foreground=discord_text)
@@ -152,11 +151,18 @@ class RTreeApp:
             50 + self.offset_x + rect[2] * scaled_scale,
             self.canvas_height - 50 - self.offset_y - rect[3] * scaled_scale,
         )
-        self.canvas.create_rectangle(scaled_rect, outline=color, width=3)
-        self.canvas.create_text(
-            (scaled_rect[0] + scaled_rect[2]) / 2, (scaled_rect[1] + scaled_rect[3]) / 2,
-            text=str(rect_id), fill="white", font=("Arial", 10, "bold")
-        )
+        rect_canvas_id = self.canvas.create_rectangle(scaled_rect, outline=color, width=3)
+        
+        text_canvas_id = None
+        # Solo dibujar el texto si el rect_id no es "B"
+        if rect_id != "B":
+            text_canvas_id = self.canvas.create_text(
+                (scaled_rect[0] + scaled_rect[2]) / 2, (scaled_rect[1] + scaled_rect[3]) / 2,
+                text=str(rect_id), fill="white", font=("Arial", 10, "bold")
+            )
+        return rect_canvas_id, text_canvas_id
+
+
 
     def draw_mbr(self):
         """Dibuja los MBRs actuales del R-Tree con colores diferenciados por niveles."""
@@ -172,22 +178,6 @@ class RTreeApp:
         self.history = self.history[:self.current_state + 1]
         self.history.append(copy.deepcopy(self.index))
         self.current_state += 1
-
-    def skip_back(self):
-        """Vuelve al estado anterior del historial."""
-        if self.current_state > 0:
-            self.current_state -= 1
-            self.index = copy.deepcopy(self.history[self.current_state])
-            self.draw_mbr()
-            self.log_operation("Estado restaurado al anterior.")
-
-    def skip(self):
-        """Avanza al siguiente estado en el historial."""
-        if self.current_state < len(self.history) - 1:
-            self.current_state += 1
-            self.index = copy.deepcopy(self.history[self.current_state])
-            self.draw_mbr()
-            self.log_operation("Estado restaurado al siguiente.")
 
     def get_level(self, rect_id):
         """Calcula el nivel del rectángulo en el R-Tree."""
@@ -255,16 +245,28 @@ class RTreeApp:
 
             x1, y1, x2, y2 = coords
             search_area = (x1, y1, x2, y2)
-            self.draw_rectangle(search_area, "B", color="red")
+            search_rect_id, search_text_id = self.draw_rectangle(search_area, "B", color="red")
 
             results = [obj.id for obj in self.index.intersection(search_area, objects=True)]
             self.log_operation(f"Área buscada: {search_area}. Rectángulos encontrados: {results}")
             messagebox.showinfo("Búsqueda", f"Área buscada: {search_area}\nIDs encontrados: {results}")
+
+            # Eliminar el rectángulo de búsqueda y su texto después de mostrar el mensaje
+            self.canvas.delete(search_rect_id)
+            if search_text_id:
+                self.canvas.delete(search_text_id)
         except ValueError:
             messagebox.showerror("Error", "El formato debe ser: x1, y1, x2, y2 con valores numéricos.")
         except Exception as e:
             messagebox.showerror("Error", f"Error al buscar rectángulos: {e}")
-
+            
+    def clear_all(self):
+        """Elimina todos los rectángulos del R-Tree."""
+        self.index = index.Index()
+        self.history = [copy.deepcopy(self.index)]
+        self.current_state = 0
+        self.draw_mbr()
+        self.log_operation("Todos los rectángulos han sido eliminados.")
 
 if __name__ == "__main__":
     root = tk.Tk()
